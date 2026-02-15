@@ -56,6 +56,8 @@ export default function App() {
         <Route path="/assessment" element={<AssessmentPage />} />
         <Route path="/plan" element={<PlanPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        {/* FIX-LAUNCH-05: catch-all route — если HashRouter не смог распарсить Telegram hash */}
+        <Route path="*" element={<IntakePage />} />
       </Routes>
     </SessionSyncContext.Provider>
   );

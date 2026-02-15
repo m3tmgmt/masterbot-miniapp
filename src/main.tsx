@@ -19,6 +19,15 @@ try {
   // Не блокируем рендер — useTelegramAuth обработает ошибку
 }
 
+// FIX-LAUNCH-05: Telegram Web K помещает launch params в hash (#tgWebAppData=...),
+// что конфликтует с HashRouter (ожидает #/ для роутинга).
+// После того как init() прочитал params из hash, сбрасываем hash на root route.
+// Также сохраняем startapp/syncId если они есть в hash params.
+if (window.location.hash && window.location.hash.includes('tgWebAppData') && !window.location.hash.startsWith('#/')) {
+  console.log('[main] Telegram hash detected, resetting to #/ for HashRouter');
+  window.location.hash = '#/';
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <HashRouter>
