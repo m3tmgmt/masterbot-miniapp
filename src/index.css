@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* Telegram WebApp тема */
+:root {
+  --tg-theme-bg-color: #1c1c1e;
+  --tg-theme-text-color: #ffffff;
+  --tg-theme-hint-color: #8e8e93;
+  --tg-theme-link-color: #007aff;
+  --tg-theme-button-color: #007aff;
+  --tg-theme-button-text-color: #ffffff;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--tg-theme-bg-color, #1c1c1e);
+  color: var(--tg-theme-text-color, #ffffff);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Убрать выделение при тапе на мобильных */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
