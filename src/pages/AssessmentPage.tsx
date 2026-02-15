@@ -6,6 +6,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase.ts';
 import { useSessionSync } from '../hooks/useSessionSync.ts';
+import { useTrustRealtime } from '../hooks/useTrustRealtime.ts';
+import { useSessionSyncContext } from '../contexts/SessionSyncContext.tsx';
 import { SOAPSection } from '../components/SOAPSection.tsx';
 import { TrustBadge } from '../components/TrustBadge.tsx';
 import { BodyMap } from '../components/BodyMap.tsx';
@@ -78,11 +80,13 @@ export function AssessmentPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const assessmentId = searchParams.get('assessmentId');
-  const sessionSyncId = searchParams.get('sessionSyncId');
+  const ctx = useSessionSyncContext();
+  const assessmentId = searchParams.get('assessmentId') || ctx.assessmentId;
+  const sessionSyncId = searchParams.get('sessionSyncId') || ctx.syncId;
 
-  // Realtime подписка
+  // Realtime подписки
   const { videoAiResults, lastEvent } = useSessionSync(sessionSyncId);
+  const trustRealtime = useTrustRealtime(sessionSyncId, assessmentId);
 
   // Данные assessment
   const [assessment, setAssessment] = useState<AssessmentDbRow | null>(null);
@@ -141,8 +145,18 @@ export function AssessmentPage() {
   const objective = assessment?.objective_data ?? null;
   const assessmentResult = assessment?.structured_assessment ?? null;
   const planData = assessment?.plan_data ?? null;
-  const trustWeights = assessment?.trust_weights ?? { ai: 0.4, tests: 0.35, master: 0.25 };
-  const overallConfidence = assessment?.overall_confidence ?? 0;
+  // Realtime trust имеет приоритет над статичными данными из БД
+  const trustWeights = trustRealtime.lastUpdated
+    ? trustRealtime.weights
+    : (assessment?.trust_weights ?? { ai: 0.4, tests: 0.35, master: 0.25 });
+  const overallConfidence = trustRealtime.lastUpdated
+    ? trustRealtime.overallConfidence
+    : (assessment?.overall_confidence ?? 0);
+  const trustModifiers = trustRealtime.lastUpdated
+    ? trustRealtime.appliedModifiers
+    : ((assessment?.sources as Array<{ id?: string }> | null)
+        ?.map((s) => s.id)
+        .filter((id): id is string => !!id) ?? []);
 
   // Мержим ROM из Video AI realtime
   const mergedRomMeasurements: IRomMeasurement[] = [
@@ -217,6 +231,17 @@ export function AssessmentPage() {
               {ch}
             </span>
           ))}
+        </div>
+      )}
+
+      {/* Предупреждение о низкой уверенности */}
+      {overallConfidence > 0 && overallConfidence < 40 && (
+        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-2">
+          <span className="text-red-400 text-lg leading-none mt-0.5">!</span>
+          <div>
+            <p className="text-sm font-medium text-red-400">Низкая уверенность AI</p>
+            <p className="text-xs text-red-400/70 mt-0.5">Рекомендуется ручная проверка рекомендаций</p>
+          </div>
         </div>
       )}
 
@@ -410,11 +435,9 @@ export function AssessmentPage() {
             <TrustBadge
               weights={trustWeights}
               overallConfidence={overallConfidence}
-              appliedModifiers={
-                (assessment?.sources as Array<{ id?: string }> | null)
-                  ?.map((s) => s.id)
-                  .filter((id): id is string => !!id) ?? []
-              }
+              appliedModifiers={trustModifiers}
+              isLive={trustRealtime.isLive}
+              lastUpdated={trustRealtime.lastUpdated}
             />
           </div>
 

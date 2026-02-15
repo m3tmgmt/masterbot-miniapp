@@ -6,6 +6,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase.ts';
 import { useSessionSync } from '../hooks/useSessionSync.ts';
+import { useTrustRealtime } from '../hooks/useTrustRealtime.ts';
+import { useSessionSyncContext } from '../contexts/SessionSyncContext.tsx';
+import { TrustBadge } from '../components/TrustBadge.tsx';
 import { TechniqueSearchModal } from '../components/TechniqueSearchModal.tsx';
 import type { ITreatmentPlanV2, ITreatmentBlock, IPlanData } from '../types/index.ts';
 
@@ -69,11 +72,13 @@ export function PlanPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const assessmentId = searchParams.get('assessmentId');
-  const sessionSyncId = searchParams.get('sessionSyncId');
+  const ctx = useSessionSyncContext();
+  const assessmentId = searchParams.get('assessmentId') || ctx.assessmentId;
+  const sessionSyncId = searchParams.get('sessionSyncId') || ctx.syncId;
 
   // Realtime
   const { sendEvent } = useSessionSync(sessionSyncId);
+  const trustRealtime = useTrustRealtime(sessionSyncId, assessmentId);
 
   // Состояние
   const [phases, setPhases] = useState<PhaseState[]>([createEmptyPhase(1)]);
@@ -294,9 +299,33 @@ export function PlanPage() {
     <div className="p-4 pb-40 min-h-screen">
       {/* Заголовок */}
       <h1 className="text-xl font-bold mb-1">План лечения</h1>
-      <p className="text-sm text-gray-400 mb-4">
+      <p className="text-sm text-gray-400 mb-3">
         {totalDuration} мин | {phases.length} {phases.length === 1 ? 'фаза' : 'фазы'}
       </p>
+
+      {/* Компактный Trust Badge */}
+      {trustRealtime.overallConfidence > 0 && (
+        <div className="mb-3">
+          <TrustBadge
+            weights={trustRealtime.weights}
+            overallConfidence={trustRealtime.overallConfidence}
+            appliedModifiers={trustRealtime.appliedModifiers}
+            isLive={trustRealtime.isLive}
+            lastUpdated={trustRealtime.lastUpdated}
+          />
+        </div>
+      )}
+
+      {/* Предупреждение о низкой уверенности */}
+      {trustRealtime.overallConfidence > 0 && trustRealtime.overallConfidence < 40 && (
+        <div className="mb-3 p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 flex items-start gap-2">
+          <span className="text-red-400 text-lg leading-none">!</span>
+          <div>
+            <p className="text-sm font-medium text-red-400">Низкая уверенность AI</p>
+            <p className="text-xs text-red-400/70 mt-0.5">Проверьте план вручную перед подтверждением</p>
+          </div>
+        </div>
+      )}
 
       {/* Ошибка */}
       {error && (

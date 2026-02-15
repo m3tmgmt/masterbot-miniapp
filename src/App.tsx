@@ -1,7 +1,11 @@
 // MasterBot Mini App — Router с авторизацией Telegram
 // HashRouter для совместимости с GitHub Pages и Telegram WebView
+// SessionSyncContext — связь с Bot через Supabase Realtime
 import { Routes, Route } from 'react-router-dom';
 import { useTelegramAuth } from './hooks/useTelegramAuth.ts';
+import { useActiveSyncSession } from './hooks/useActiveSyncSession.ts';
+import { useSessionSync } from './hooks/useSessionSync.ts';
+import { SessionSyncContext } from './contexts/SessionSyncContext.tsx';
 import { IntakePage } from './pages/IntakePage.tsx';
 import { PhotoPage } from './pages/PhotoPage.tsx';
 import { AssessmentPage } from './pages/AssessmentPage.tsx';
@@ -10,9 +14,11 @@ import { HistoryPage } from './pages/HistoryPage.tsx';
 
 export default function App() {
   const auth = useTelegramAuth();
+  const { syncId, assessmentId, loading: syncLoading } = useActiveSyncSession();
+  const sessionSync = useSessionSync(syncId);
 
   // Ожидание инициализации SDK
-  if (!auth.isReady) {
+  if (!auth.isReady || syncLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <p className="text-gray-400">Загрузка...</p>
@@ -36,12 +42,21 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<IntakePage />} />
-      <Route path="/photo" element={<PhotoPage />} />
-      <Route path="/assessment" element={<AssessmentPage />} />
-      <Route path="/plan" element={<PlanPage />} />
-      <Route path="/history" element={<HistoryPage />} />
-    </Routes>
+    <SessionSyncContext.Provider
+      value={{
+        syncId,
+        assessmentId,
+        sendEvent: sessionSync.sendEvent,
+        isConnected: sessionSync.isConnected,
+      }}
+    >
+      <Routes>
+        <Route path="/" element={<IntakePage />} />
+        <Route path="/photo" element={<PhotoPage />} />
+        <Route path="/assessment" element={<AssessmentPage />} />
+        <Route path="/plan" element={<PlanPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+      </Routes>
+    </SessionSyncContext.Provider>
   );
 }

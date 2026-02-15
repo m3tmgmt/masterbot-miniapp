@@ -1,20 +1,13 @@
 // Бейдж доверия — отображает веса AI / Тесты / Мастер
-// Цветовая кодировка: ≥80% зелёный, ≥50% жёлтый, <50% красный
-// Расширяемый: по клику показывает применённые модификаторы
+// Цветовая кодировка: >70 зелёный, 40-70 жёлтый, <40 красный
+// Анимация при Realtime обновлении + tooltip + TrustBreakdown
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { TrustBreakdown } from './TrustBreakdown.tsx';
 
-// Описания модификаторов (из trust-model.ts, без runtime импорта)
-const MODIFIER_DESCRIPTIONS: Record<string, string> = {
-  video_good_quality: 'Video AI: высокое качество (FPS ≥ 25)',
-  no_video: 'Video AI не использовался',
-  rom_stable_3plus: '3+ стабильных ROM замера',
-  master_senior: 'Мастер: 5+ лет опыта',
-  ai_confidence_high: 'AI confidence ≥ 85%',
-  ai_confidence_low: 'AI confidence < 50%',
-  returning_client: 'Повторный клиент (3+ сеансов)',
-  first_visit: 'Первый визит клиента',
-};
+// ═══════════════════════════════════════════════════════════════
+// Типы
+// ═══════════════════════════════════════════════════════════════
 
 interface TrustBadgeProps {
   /** Веса источников (0-1 каждый, сумма = 1.0) */
@@ -23,56 +16,118 @@ interface TrustBadgeProps {
   overallConfidence: number;
   /** ID применённых модификаторов */
   appliedModifiers?: string[];
+  /** Данные обновляются в Realtime */
+  isLive?: boolean;
+  /** Время последнего обновления */
+  lastUpdated?: number | null;
 }
 
-/** Цвет текста по значению веса (0-1) */
-function getWeightColor(value: number): string {
-  if (value >= 0.8) return 'text-green-400';
-  if (value >= 0.5) return 'text-yellow-400';
+// ═══════════════════════════════════════════════════════════════
+// Вспомогательные функции
+// ═══════════════════════════════════════════════════════════════
+
+/** Tooltips для весов (русский) */
+const WEIGHT_TOOLTIPS: Record<string, string> = {
+  AI: 'Данные из MediaPipe и Groq: позы, углы, AI-анализ',
+  'Тесты': 'ROM замеры, опросники, лабораторные данные',
+  'Мастер': 'Наблюдения и экспертиза практикующего мастера',
+};
+
+/** Цвет текста confidence по порогам */
+function getConfidenceTextColor(confidence: number): string {
+  if (confidence > 70) return 'text-green-400';
+  if (confidence >= 40) return 'text-yellow-400';
   return 'text-red-400';
 }
 
-/** Цвет фона по значению веса */
-function getWeightBg(value: number): string {
-  if (value >= 0.8) return 'bg-green-400/20';
-  if (value >= 0.5) return 'bg-yellow-400/20';
-  return 'bg-red-400/20';
-}
-
-/** Цвет бара по confidence (0-100) */
-function getConfidenceColor(confidence: number): string {
-  if (confidence >= 80) return 'bg-green-500';
-  if (confidence >= 50) return 'bg-yellow-500';
+/** Цвет бара confidence */
+function getConfidenceBarColor(confidence: number): string {
+  if (confidence > 70) return 'bg-green-500';
+  if (confidence >= 40) return 'bg-yellow-500';
   return 'bg-red-500';
 }
 
-export function TrustBadge({ weights, overallConfidence, appliedModifiers }: TrustBadgeProps) {
+/** Цвет фона весовой ячейки */
+function getWeightBg(value: number): string {
+  if (value >= 0.5) return 'bg-green-400/15';
+  if (value >= 0.3) return 'bg-yellow-400/15';
+  return 'bg-gray-700/30';
+}
+
+/** Цвет текста весовой ячейки */
+function getWeightTextColor(value: number): string {
+  if (value >= 0.5) return 'text-green-400';
+  if (value >= 0.3) return 'text-yellow-400';
+  return 'text-gray-400';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Компонент
+// ═══════════════════════════════════════════════════════════════
+
+export function TrustBadge({
+  weights,
+  overallConfidence,
+  appliedModifiers,
+  isLive,
+  lastUpdated,
+}: TrustBadgeProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showPulse, setShowPulse] = useState(false);
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
+
+  // Отслеживание изменений confidence для анимации
+  const prevConfidenceRef = useRef(overallConfidence);
+
+  useEffect(() => {
+    if (prevConfidenceRef.current !== overallConfidence && prevConfidenceRef.current !== 0) {
+      // Значение изменилось — показать пульс
+      setShowPulse(true);
+      const timer = setTimeout(() => setShowPulse(false), 1000);
+      return () => clearTimeout(timer);
+    }
+    prevConfidenceRef.current = overallConfidence;
+  }, [overallConfidence]);
+
+  // Отображение confidence как X.X/10
+  const confidenceOn10 = (overallConfidence / 10).toFixed(1);
 
   const sources = [
-    { label: 'AI', value: weights.ai },
-    { label: 'Тесты', value: weights.tests },
-    { label: 'Мастер', value: weights.master },
+    { key: 'AI', label: 'AI', value: weights.ai },
+    { key: 'Тесты', label: 'Тесты', value: weights.tests },
+    { key: 'Мастер', label: 'Мастер', value: weights.master },
   ];
+
+  // Время последнего обновления (относительное)
+  const lastUpdatedText = lastUpdated
+    ? `${Math.round((Date.now() - lastUpdated) / 1000)}с назад`
+    : null;
 
   return (
     <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3">
-      {/* Общий confidence */}
+      {/* Заголовок с confidence */}
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between mb-2"
       >
-        <span className="text-sm font-medium text-gray-300">Уверенность</span>
         <div className="flex items-center gap-2">
-          <span className={`text-sm font-bold ${
-            overallConfidence >= 80 ? 'text-green-400' :
-            overallConfidence >= 50 ? 'text-yellow-400' : 'text-red-400'
-          }`}>
-            {overallConfidence}%
+          <span className="text-sm font-medium text-gray-300">Уверенность</span>
+          {/* Индикатор Realtime */}
+          {isLive && (
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Confidence число */}
+          <span
+            className={`text-sm font-bold transition-all duration-300 ${getConfidenceTextColor(overallConfidence)} ${showPulse ? 'animate-pulse scale-110' : ''}`}
+          >
+            {confidenceOn10}/10
           </span>
+          {/* Стрелка раскрытия */}
           <svg
-            className={`w-4 h-4 text-gray-500 transition-transform ${expanded ? 'rotate-180' : ''}`}
+            className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor"
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -80,49 +135,52 @@ export function TrustBadge({ weights, overallConfidence, appliedModifiers }: Tru
         </div>
       </button>
 
-      {/* Прогресс бар */}
+      {/* Прогресс бар confidence */}
       <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden mb-3">
         <div
-          className={`h-full rounded-full transition-all ${getConfidenceColor(overallConfidence)}`}
+          className={`h-full rounded-full transition-all duration-500 ease-out ${getConfidenceBarColor(overallConfidence)}`}
           style={{ width: `${Math.min(overallConfidence, 100)}%` }}
         />
       </div>
 
-      {/* Веса источников */}
+      {/* Три весовые полоски */}
       <div className="flex gap-2">
-        {sources.map(({ label, value }) => (
+        {sources.map(({ key, label, value }) => (
           <div
-            key={label}
-            className={`flex-1 rounded-md px-2 py-1.5 text-center ${getWeightBg(value)}`}
+            key={key}
+            className={`flex-1 rounded-md px-2 py-1.5 text-center relative cursor-default transition-all duration-500 ${getWeightBg(value)}`}
+            onMouseEnter={() => setActiveTooltip(key)}
+            onMouseLeave={() => setActiveTooltip(null)}
+            onTouchStart={() => setActiveTooltip(activeTooltip === key ? null : key)}
           >
             <div className="text-xs text-gray-400">{label}</div>
-            <div className={`text-sm font-semibold ${getWeightColor(value)}`}>
+            <div className={`text-sm font-semibold transition-all duration-500 ${getWeightTextColor(value)}`}>
               {Math.round(value * 100)}%
             </div>
+
+            {/* Tooltip */}
+            {activeTooltip === key && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 bg-gray-900 border border-gray-600 rounded-md text-[11px] text-gray-300 whitespace-nowrap z-10 shadow-lg">
+                {WEIGHT_TOOLTIPS[key]}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 w-2 h-2 bg-gray-900 border-r border-b border-gray-600 rotate-45 -mt-1" />
+              </div>
+            )}
           </div>
         ))}
       </div>
 
-      {/* Развёрнутые модификаторы */}
-      {expanded && appliedModifiers && appliedModifiers.length > 0 && (
-        <div className="mt-3 pt-3 border-t border-gray-700">
-          <p className="text-xs text-gray-500 mb-1.5">Применённые модификаторы:</p>
-          <ul className="space-y-1">
-            {appliedModifiers.map((modId) => (
-              <li key={modId} className="text-xs text-gray-400 flex items-start gap-1.5">
-                <span className="text-blue-400 mt-0.5">•</span>
-                <span>{MODIFIER_DESCRIPTIONS[modId] ?? modId}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {/* Время обновления */}
+      {lastUpdatedText && (
+        <p className="text-[10px] text-gray-600 mt-2 text-right">
+          Обновлено {lastUpdatedText}
+        </p>
       )}
 
-      {expanded && (!appliedModifiers || appliedModifiers.length === 0) && (
-        <div className="mt-3 pt-3 border-t border-gray-700">
-          <p className="text-xs text-gray-500">Модификаторы не применены (базовые веса)</p>
-        </div>
-      )}
+      {/* TrustBreakdown — раскрывается по клику */}
+      <TrustBreakdown
+        appliedModifiers={appliedModifiers ?? []}
+        isExpanded={expanded}
+      />
     </div>
   );
 }

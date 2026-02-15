@@ -6,6 +6,7 @@
 
 import { useState, useCallback } from 'react';
 import { useTelegramAuth } from '../hooks/useTelegramAuth.ts';
+import { useSessionSyncContext } from '../contexts/SessionSyncContext.tsx';
 import { BodyMap } from '../components/BodyMap.tsx';
 import { BodyMapViewSwitcher } from '../components/BodyMapViewSwitcher.tsx';
 import { PainZoneDetail } from '../components/PainZoneDetail.tsx';
@@ -98,6 +99,7 @@ function deriveLongestDuration(details: Map<string, ZoneDetailData>): string {
 
 export function IntakePage() {
   const { userName, userId, startParam, isReady } = useTelegramAuth();
+  const { assessmentId: existingAssessmentId, sendEvent } = useSessionSyncContext();
 
   // ─── Wizard step ───
   const [currentStep, setCurrentStep] = useState(1);
@@ -290,37 +292,61 @@ export function IntakePage() {
         return;
       }
 
-      // INSERT в pre_session_assessments
-      const { error } = await supabase
-        .from('pre_session_assessments')
-        .insert({
-          practitioner_id: practitionerId,
-          client_id: clientId,
-          chief_complaint: data.chiefComplaint,
-          pain_locations: data.painZones.map(z => z.bodyArea),
-          pain_severity: data.painSeverity,
-          pain_duration: data.painDuration,
-          additional_info: data.additionalNotes || null,
-          contraindications: data.contraindications,
-          status: 'in_progress',
-          // v2 поля
-          channels_used: ['mini_app'],
-          engine_version: '2.0',
-          subjective_data: {
-            chiefComplaint: data.chiefComplaint,
-            painZones: data.painZones,
-            painSeverity: data.painSeverity,
-            painDuration: data.painDuration,
-            medicalHistory: data.medicalHistory || null,
-            additionalInfo: data.additionalNotes || null,
-          },
-        });
+      // Общие поля для insert/update
+      const assessmentPayload = {
+        practitioner_id: practitionerId,
+        client_id: clientId,
+        chief_complaint: data.chiefComplaint,
+        pain_locations: data.painZones.map(z => z.bodyArea),
+        pain_severity: data.painSeverity,
+        pain_duration: data.painDuration,
+        additional_info: data.additionalNotes || null,
+        contraindications: data.contraindications,
+        status: 'in_progress',
+        channels_used: ['mini_app'],
+        engine_version: '2.0',
+        subjective_data: {
+          chiefComplaint: data.chiefComplaint,
+          painZones: data.painZones,
+          painSeverity: data.painSeverity,
+          painDuration: data.painDuration,
+          medicalHistory: data.medicalHistory || null,
+          additionalInfo: data.additionalNotes || null,
+        },
+      };
 
-      if (error) {
-        console.error('[IntakePage] Supabase insert error:', error);
+      let dbError: unknown = null;
+
+      if (existingAssessmentId) {
+        // UPDATE существующий assessment (созданный ботом через session_sync)
+        const { error } = await supabase
+          .from('pre_session_assessments')
+          .update(assessmentPayload)
+          .eq('id', existingAssessmentId);
+        dbError = error;
+      } else {
+        // INSERT новый assessment (fallback — Mini App открыта без сессии)
+        const { error } = await supabase
+          .from('pre_session_assessments')
+          .insert(assessmentPayload);
+        dbError = error;
+      }
+
+      if (dbError) {
+        console.error('[IntakePage] Supabase error:', dbError);
         setSubmitError('Данные сохранены локально. Синхронизация будет выполнена позже.');
       } else {
         clearLocalStorage();
+
+        // Уведомить бота через Realtime (если подключены)
+        sendEvent('intake_completed', {
+          bodyZones: data.painZones.map(z => z.bodyArea),
+          complaints: data.chiefComplaint,
+          contraindications: data.contraindications,
+          timestamp: Date.now(),
+        }).catch((err) => {
+          console.warn('[IntakePage] Failed to send intake_completed event:', err);
+        });
       }
 
       setSubmitSuccess(true);
